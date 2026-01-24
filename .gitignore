@@ -37,6 +37,9 @@ env/
 .env
 .env.local
 
+# Runtime state
+seen.json
+
 # OS
 .DS_Store
 Thumbs.db
