@@ -3,6 +3,8 @@ import sys
 import json
 import asyncio
 import time
+import re
+import html
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
@@ -20,25 +22,23 @@ load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
-POLL_MINUTES = int(os.getenv("POLL_MINUTES", "30"))
+POLL_MINUTES = int(os.getenv("POLL_MINUTES", "60"))
 # Optional: for instant slash-command registration (recommended).
 # If unset/0, commands will sync globally (can take a while to appear).
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 
-# Start small; you can expand later.
+# Three platforms for news posts
 FEEDS: List[Tuple[str, str]] = [
     ("OpenAI News", "https://openai.com/news/rss.xml"),
-    ("OpenAI Engineering", "https://openai.com/news/engineering/rss.xml"),
     ("DeepMind", "https://deepmind.google/blog/rss.xml"),
-    ("arXiv cs.AI", "https://rss.arxiv.org/rss/cs.AI"),
     ("Google Research", "https://research.google/blog/rss/"),
-    ("Microsoft Research", "https://www.microsoft.com/en-us/research/feed/"),
-    ("Hugging Face", "https://huggingface.co/blog/feed.xml"),
 ]
 
 # Always store `seen.json` next to this script (avoid duplicates due to different working directories).
 SEEN_PATH = Path(__file__).with_name("seen.json")
-MAX_POSTS_PER_RUN = 5  # safety: avoid dumping 100 links at once
+# Default: one item per source per poll (3 platforms = 3 posts).
+_DEFAULT_MAX_POSTS_PER_RUN = len(FEEDS)  # Exactly 3, one per platform
+MAX_POSTS_PER_RUN = int(os.getenv("MAX_POSTS_PER_RUN", str(_DEFAULT_MAX_POSTS_PER_RUN)))
 # Anti-spam controls
 # - If BATCH_POST=1 (default), send one message containing up to MAX_POSTS_PER_RUN items.
 # - If BATCH_POST=0, send items one-by-one with a short delay between sends.
@@ -46,6 +46,8 @@ BATCH_POST = os.getenv("BATCH_POST", "1") == "1"
 POST_DELAY_SECONDS = float(os.getenv("POST_DELAY_SECONDS", "1.5"))
 # Diversity control: limit how many items per source per poll.
 MAX_PER_SOURCE_PER_RUN = int(os.getenv("MAX_PER_SOURCE_PER_RUN", "1"))
+# How long each item summary should be (plain text).
+SUMMARY_CHARS = int(os.getenv("SUMMARY_CHARS", "280"))
 
 intents = discord.Intents.default()  # posting only; no message-content needed
 client = discord.Client(intents=intents)
@@ -55,6 +57,33 @@ tree = app_commands.CommandTree(client)
 @tree.command(name="ping", description="Health check: replies with pong.")
 async def ping(interaction: discord.Interaction) -> None:
     await interaction.response.send_message("pong", ephemeral=True)
+
+@tree.command(name="test-post", description="Send a test message to the configured channel.")
+async def test_post(interaction: discord.Interaction) -> None:
+    """Test if the bot can post to the configured channel"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        channel = client.get_channel(CHANNEL_ID)
+        if channel is None:
+            channel = await client.fetch_channel(CHANNEL_ID)
+        
+        test_msg = """**🧪 Test Post - AI News Bot**
+
+This is a test message to verify the bot can post to this channel.
+
+✅ If you see this, the bot is working correctly!
+📊 Channel ID: `{}`
+🤖 Bot: {}""".format(CHANNEL_ID, client.user.name if client.user else "Unknown")
+        
+        await channel.send(test_msg)
+        await interaction.followup.send("✅ Test message sent successfully!", ephemeral=True)
+    except discord.NotFound:
+        await interaction.followup.send(f"❌ ERROR: Channel {CHANNEL_ID} not found", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.followup.send("❌ ERROR: Missing permissions to post in this channel", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ ERROR: {e}", ephemeral=True)
 
 def print_accessible_text_channels(limit_per_guild: int = 25) -> None:
     try:
@@ -106,6 +135,32 @@ def entry_timestamp(entry: Dict) -> float:
                 pass
     return time.time()
 
+def clean_text(s: str) -> str:
+    # Strip HTML and normalize whitespace for Discord.
+    s = html.unescape(s or "")
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def entry_summary(entry: Dict) -> str:
+    # Try common feed fields.
+    for key in ("summary", "description"):
+        val = entry.get(key)
+        if val:
+            return clean_text(val)
+    content = entry.get("content")
+    if isinstance(content, list) and content:
+        val = content[0].get("value")
+        if val:
+            return clean_text(val)
+    return ""
+
+def clamp(s: str, n: int) -> str:
+    s = (s or "").strip()
+    if len(s) <= n:
+        return s
+    return s[: max(0, n - 1)].rstrip() + "…"
+
 async def fetch_feed(session: aiohttp.ClientSession, name: str, url: str) -> List[Dict]:
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
@@ -122,6 +177,7 @@ async def fetch_feed(session: aiohttp.ClientSession, name: str, url: str) -> Lis
             # Some feeds (e.g. Hugging Face) may omit <link>; fall back to id/guid.
             link = entry.get("link") or entry.get("id")
             title = entry.get("title", "(no title)")
+            summary = entry_summary(entry)
             # "id" is not always present; fall back to link.
             uid = entry.get("id") or link
             if not uid or not link:
@@ -133,12 +189,16 @@ async def fetch_feed(session: aiohttp.ClientSession, name: str, url: str) -> Lis
                     "title": title,
                     "link": link,
                     "ts": entry_timestamp(entry),
+                    "summary": summary,
                 }
             )
         return items
+    except aiohttp.ClientError as e:
+        print(f"  ✗ Network error fetching {name}: {e}")
+        return []  # Return empty list instead of raising
     except Exception as e:
         print(f"  ✗ Error fetching {name}: {e}")
-        raise
+        return []  # Return empty list instead of raising
 
 def to_embed(item: Dict) -> discord.Embed:
     embed = discord.Embed(title=item["title"], url=item["link"])
@@ -164,22 +224,28 @@ def to_text(item: Dict) -> str:
     return f"[{source}] {title}\n{link}".strip()[:2000]
 
 def to_batch_text(items: List[Dict]) -> str:
-    # Build a compact, plain-text batch message within Discord's 2000 char limit.
-    lines: List[str] = []
+    # Build a short text digest (title + summary + link), within Discord's 2000 char limit.
+    blocks: List[str] = []
     for item in items:
         source = item.get("source", "Unknown")
-        title = (item.get("title") or "(no title)").replace("\n", " ").strip()
-        link = item.get("link", "").strip()
-        # One-line per item to keep it compact
-        lines.append(f"- [{source}] {title} — {link}".strip())
+        title = clean_text(item.get("title") or "(no title)")
+        summary = clamp(clean_text(item.get("summary") or ""), SUMMARY_CHARS)
+        link = (item.get("link") or "").strip()
+        # Plain text link (no <> wrapping to avoid any embed previews)
+        block = f"[{source}] {title}"
+        if summary:
+            block += f"\n{summary}"
+        if link:
+            block += f"\n{link}"
+        blocks.append(block.strip())
 
-    header = "AI news updates:\n"
+    header = "AI news digest:\n"
     out = header
-    for line in lines:
-        # +1 for newline
-        if len(out) + len(line) + 1 > 2000:
+    for block in blocks:
+        chunk = block + "\n\n"
+        if len(out) + len(chunk) > 2000:
             break
-        out += line + "\n"
+        out += chunk
     return out.rstrip()[:2000]
 
 async def do_poll_and_post():
@@ -222,21 +288,37 @@ async def do_poll_and_post():
         )
 
     feed_count = 0
+    successful_feeds = 0
+    new_per_source: Dict[str, int] = {}
     for i, res in enumerate(results):
+        source_name = FEEDS[i][0]
         if isinstance(res, Exception):
-            print(f"  ✗ Error fetching {FEEDS[i][0]}: {res}")
+            print(f"  ✗ Error fetching {source_name}: {res}")
+            new_per_source[source_name] = 0
             continue
+        successful_feeds += 1
         feed_count += len(res)
+        new_count = 0
         for item in res:
             uid = item.get("uid")
             if not uid or uid in seen:
                 continue
+            new_count += 1
             # De-dupe within a single poll; keep the newest timestamp for that uid.
             prev = candidates.get(uid)
             if prev is None or float(item.get("ts", 0)) > float(prev.get("ts", 0)):
                 candidates[uid] = item
+        new_per_source[source_name] = new_count
+        if new_count > 0:
+            print(f"  ✓ {source_name}: {new_count} new items (from {len(res)} total)")
+        else:
+            print(f"  - {source_name}: {len(res)} items, but all already seen")
     
-    print(f"  ✓ Fetched {feed_count} total items from {len([r for r in results if not isinstance(r, Exception)])} feeds")
+    print(f"  ✓ Fetched {feed_count} total items from {successful_feeds}/{len(FEEDS)} feeds")
+    if successful_feeds == 0:
+        print("  ⚠ WARNING: No feeds were successfully fetched. Check your network connection.")
+    elif sum(new_per_source.values()) == 0:
+        print("  ⚠ WARNING: All items from all feeds are already in seen.json (nothing new to post)")
 
     # Choose the newest items across ALL feeds (not just the last feed),
     # then post oldest-first for readability.
@@ -247,12 +329,19 @@ async def do_poll_and_post():
     for it in all_items_newest_first:
         by_source.setdefault(it.get("source", "Unknown"), []).append(it)
 
+    # Log what we have per source
+    if by_source:
+        print(f"  → New items by source: {', '.join(f'{k}: {len(v)}' for k, v in by_source.items())}")
+
     picked_newest_first: List[Dict] = []
     per_source_count: Dict[str, int] = {k: 0 for k in by_source.keys()}
 
     # Pass 1: round-robin pick across sources up to MAX_PER_SOURCE_PER_RUN each.
+    # This ensures we get items from different sources even if one has many more new items.
     made_progress = True
-    while made_progress and len(picked_newest_first) < MAX_POSTS_PER_RUN:
+    iteration = 0
+    while made_progress and len(picked_newest_first) < MAX_POSTS_PER_RUN and iteration < 100:  # safety limit
+        iteration += 1
         made_progress = False
         for source, items in by_source.items():
             if len(picked_newest_first) >= MAX_POSTS_PER_RUN:
@@ -272,11 +361,17 @@ async def do_poll_and_post():
             remaining.extend(items)
         remaining.sort(key=lambda x: float(x.get("ts", 0)), reverse=True)
         picked_newest_first.extend(remaining[: (MAX_POSTS_PER_RUN - len(picked_newest_first))])
+    
+    if picked_newest_first:
+        sources = [it.get("source", "Unknown") for it in picked_newest_first]
+        print(f"  → Selected {len(picked_newest_first)} items: {', '.join(sources)}")
 
     # Post oldest-first for readability.
     new_items = list(reversed(picked_newest_first))
 
-    if new_items:
+    if len(candidates) == 0:
+        print("  ⚠ No new items found (all items already in seen.json or no items fetched)")
+    elif new_items:
         print(f"  ✓ Found {len(new_items)} new items to post")
         # Pre-check posting permissions when possible.
         try:
@@ -352,12 +447,15 @@ async def on_ready():
     if not poll_and_post.is_running():
         poll_and_post.start()
         print("✓ Polling task started")
-        print("Running initial feed check...")
+        print("Running initial feed check in 3 seconds...")
         async def _startup_poll():
             try:
+                await asyncio.sleep(3)  # Brief delay to ensure everything is ready
                 await do_poll_and_post()
             except Exception as e:
+                import traceback
                 print(f"ERROR: Initial poll failed: {e}")
+                print(traceback.format_exc())
         asyncio.create_task(_startup_poll())
 
 def main():
