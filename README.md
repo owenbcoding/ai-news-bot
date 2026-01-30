@@ -1,7 +1,4 @@
 # ai-news-bot
-<<<<<<< HEAD
-A simple bot that shares ai-news from online sources!
-=======
 
 A Discord bot that posts AI news links (plain text) from multiple RSS feeds into a channel on a schedule.
 
@@ -36,6 +33,47 @@ source .venv/bin/activate
 python bot.py
 ```
 
+## Auto-start on boot (Raspberry Pi)
+
+### Option A: systemd (recommended for Pi)
+
+A native systemd service is more reliable than PM2 on a headless Raspberry Pi:
+
+```bash
+sudo cp /home/kali/discordbots/ai-news-bot/ai-news-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable ai-news-bot
+sudo systemctl start ai-news-bot
+```
+
+Useful commands:
+
+- `sudo systemctl status ai-news-bot` – see if running
+- `journalctl -u ai-news-bot -f` – view logs
+- `sudo systemctl restart ai-news-bot` – restart
+
+### Option B: PM2
+
+1. Start the bot and save:
+
+```bash
+cd /home/kali/discordbots/ai-news-bot
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
+2. **Critical:** Run the exact command that `pm2 startup` prints. For example:
+
+```bash
+pm2 startup
+# Then run the output, e.g.:
+sudo env PATH=$PATH:/usr/bin /usr/local/lib/node_modules/pm2/bin/pm2 startup systemd -u kali --hp /home/kali
+```
+
+- `pm2 status` / `pm2 logs ai-news-bot` – check status and logs
+
+If PM2 still doesn't start after reboot, use Option A (systemd) instead.
+
 ## Test the bot
 
 Once the bot is running, use the slash command:
@@ -56,5 +94,3 @@ All settings are configured via `.env`:
 
 - The bot stores seen items in `seen.json` to avoid reposting. This file is ignored by git.
 - Some feeds may block RSS access (HTTP 403). The bot will skip those feeds.
-
->>>>>>> 4205c2a (Add discord AI news bot)

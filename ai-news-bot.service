@@ -1,0 +1,17 @@
+[Unit]
+Description=AI News Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kali
+WorkingDirectory=/home/kali/discordbots/ai-news-bot
+ExecStart=/home/kali/discordbots/ai-news-bot/.venv/bin/python bot.py
+Restart=always
+RestartSec=10
+
+# Bot loads .env via python-dotenv from WorkingDirectory
+
+[Install]
+WantedBy=multi-user.target
