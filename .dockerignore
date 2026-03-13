@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.git/
+.gitignore
+ai-news-bot.service
+ecosystem.config.cjs
+run.sh
+seen.json
+.env
+

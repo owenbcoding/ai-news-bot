@@ -94,3 +94,14 @@ All settings are configured via `.env`:
 
 - The bot stores seen items in `seen.json` to avoid reposting. This file is ignored by git.
 - Some feeds may block RSS access (HTTP 403). The bot will skip those feeds.
+
+How to build and run
+Build the image (from the project root):
+docker build -t ai-news-bot .
+Run the container (passing your existing .env and persisting seen.json):
+docker run -d \
+  --name ai-news-bot \
+  --env-file .env \
+  -v "$(pwd)/seen.json:/app/seen.json" \
+  ai-news-bot
+This will start the bot in Docker using the same env vars you already use locally.
