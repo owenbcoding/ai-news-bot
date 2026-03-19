@@ -142,26 +142,30 @@ async def poll_and_post():
     # Distribute items from all sources in round-robin fashion
     new_items: List[Dict] = []
     source_indices = {source: 0 for source in items_by_source.keys()}
-    
-    # Round-robin: take up to MAX_PER_SOURCE from each source
+    source_totals = {source: 0 for source in items_by_source.keys()}  # total taken per source this run
+
+    # Round-robin: take up to MAX_PER_SOURCE from each source (total per run)
     while len(new_items) < MAX_POSTS_PER_RUN:
         added_any = False
         for source_name in items_by_source.keys():
             if len(new_items) >= MAX_POSTS_PER_RUN:
                 break
+            if source_totals[source_name] >= MAX_PER_SOURCE:
+                continue
             source_items = items_by_source[source_name]
             idx = source_indices[source_name]
-            
-            # Take items from this source (up to MAX_PER_SOURCE per source)
-            items_taken = 0
-            while idx < len(source_items) and items_taken < MAX_PER_SOURCE and len(new_items) < MAX_POSTS_PER_RUN:
+
+            while (
+                idx < len(source_items)
+                and source_totals[source_name] < MAX_PER_SOURCE
+                and len(new_items) < MAX_POSTS_PER_RUN
+            ):
                 new_items.append(source_items[idx])
                 idx += 1
-                items_taken += 1
+                source_totals[source_name] += 1
                 added_any = True
             source_indices[source_name] = idx
-        
-        # If we didn't add any items, break to avoid infinite loop
+
         if not added_any:
             break
 

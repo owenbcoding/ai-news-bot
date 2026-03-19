@@ -35,7 +35,7 @@ python bot.py
 
 ## Run 24/7 with Docker (recommended for Raspberry Pi)
 
-This setup keeps the bot running continuously, restarts automatically after reboots/crashes, and persists `seen.json` so links are not reposted.
+This setup keeps the bot running continuously, restarts automatically after reboots/crashes, and persists `seen.json` so links are not reposted. See **[DEPLOY.md](DEPLOY.md)** for a full Raspberry Pi deployment guide.
 
 ### 1) Prerequisites on Pi
 
@@ -80,7 +80,18 @@ docker compose ps
 
 Container should come back automatically because `restart: unless-stopped` is set in `docker-compose.yml`.
 
-## Verify bot behavior
+## Verify bot logic (before deploying)
+
+Run the verification script to validate feed fetching, deduplication, and round-robin logic (no Discord token required):
+
+```bash
+source .venv/bin/activate   # or: pip install -r requirements.txt
+python verify.py
+```
+
+Expected output: `All checks passed`. This confirms the core logic works before deploying.
+
+## Verify bot behavior (when running)
 
 When running, logs should show:
 
