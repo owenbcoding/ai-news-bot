@@ -1,0 +1,21 @@
+services:
+  ai-news-bot:
+    build: .
+    container_name: ai-news-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Persist dedupe state in a mounted volume
+      - SEEN_PATH=/app/state/seen.json
+    volumes:
+      - ai_news_bot_state:/app/state
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ai_news_bot_state:
+

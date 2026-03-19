@@ -19,7 +19,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY bot.py ./
 
 # Default location for runtime state
-VOLUME ["/app/data"]
+VOLUME ["/app/state"]
 
 # Use /app as CWD; seen.json will live here by default
 CMD ["python", "bot.py"]

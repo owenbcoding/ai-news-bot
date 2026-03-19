@@ -33,75 +33,92 @@ source .venv/bin/activate
 python bot.py
 ```
 
-## Auto-start on boot (Raspberry Pi)
+## Run 24/7 with Docker (recommended for Raspberry Pi)
 
-### Option A: systemd (recommended for Pi)
+This setup keeps the bot running continuously, restarts automatically after reboots/crashes, and persists `seen.json` so links are not reposted.
 
-A native systemd service is more reliable than PM2 on a headless Raspberry Pi:
+### 1) Prerequisites on Pi
 
-```bash
-sudo cp /home/kali/discordbots/ai-news-bot/ai-news-bot.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable ai-news-bot
-sudo systemctl start ai-news-bot
-```
+Install Docker + Docker Compose plugin, then add your user to `docker` group.
 
-Useful commands:
-
-- `sudo systemctl status ai-news-bot` – see if running
-- `journalctl -u ai-news-bot -f` – view logs
-- `sudo systemctl restart ai-news-bot` – restart
-
-### Option B: PM2
-
-1. Start the bot and save:
+### 2) Configure env
 
 ```bash
-cd /home/kali/discordbots/ai-news-bot
-pm2 start ecosystem.config.cjs
-pm2 save
+cp .env.example .env
 ```
 
-2. **Critical:** Run the exact command that `pm2 startup` prints. For example:
+Set at minimum:
+
+- `DISCORD_TOKEN`
+- `CHANNEL_ID`
+- `POLL_MINUTES`
+- `MAX_POSTS_PER_RUN` (default `12`)
+- `MAX_PER_SOURCE_PER_RUN` (default `3`)
+
+### 3) Build and start
 
 ```bash
-pm2 startup
-# Then run the output, e.g.:
-sudo env PATH=$PATH:/usr/bin /usr/local/lib/node_modules/pm2/bin/pm2 startup systemd -u kali --hp /home/kali
+docker compose up -d --build
 ```
 
-- `pm2 status` / `pm2 logs ai-news-bot` – check status and logs
+### 4) Useful operations
 
-If PM2 still doesn't start after reboot, use Option A (systemd) instead.
+```bash
+docker compose ps
+docker compose logs -f
+docker compose restart
+docker compose pull && docker compose up -d --build
+```
 
-## Test the bot
+### 5) Verify auto-start after reboot
 
-Once the bot is running, use the slash command:
+```bash
+sudo reboot
+# after reconnect
+docker compose ps
+```
 
-- `/ping` → responds with `pong`
+Container should come back automatically because `restart: unless-stopped` is set in `docker-compose.yml`.
 
-## Behavior / settings
+## Verify bot behavior
+
+When running, logs should show:
+
+- `Logged in as ...`
+- `Watching 6 feeds`
+- `Polling every X minutes`
+
+Then on each cycle:
+
+- `[Info] No new items to post`, or
+- several `[Posted] Source: Title...` lines
+
+## Behavior / settings (current logic)
 
 All settings are configured via `.env`:
 
-- **POLL_MINUTES**: how often to fetch feeds (e.g. `30` for every 30 minutes)
-- **MAX_POSTS_PER_RUN** (in code): max links per poll (defaults to 5)
-- **BATCH_POST**: `1` sends one message per poll with multiple links (recommended)
-- **POST_DELAY_SECONDS**: delay between messages if `BATCH_POST=0`
-- **MAX_PER_SOURCE_PER_RUN**: limit items per source per poll (defaults to 1 for diversity)
+- **POLL_MINUTES**: how often feeds are fetched (e.g. `30`)
+- **MAX_POSTS_PER_RUN**: hard cap of articles posted per poll cycle (default `12`)
+- **MAX_PER_SOURCE_PER_RUN**: cap per source inside each cycle (default `3`)
+- **SEEN_PATH**: path to dedupe file (`seen.json`) used to avoid reposting
 
 ## Notes
 
 - The bot stores seen items in `seen.json` to avoid reposting. This file is ignored by git.
 - Some feeds may block RSS access (HTTP 403). The bot will skip those feeds.
+- In Docker, dedupe state is persisted in a named volume mounted at `/app/state`.
 
-How to build and run
-Build the image (from the project root):
-docker build -t ai-news-bot .
-Run the container (passing your existing .env and persisting seen.json):
-docker run -d \
-  --name ai-news-bot \
-  --env-file .env \
-  -v "$(pwd)/seen.json:/app/seen.json" \
-  ai-news-bot
-This will start the bot in Docker using the same env vars you already use locally.
+## Article count sanity check after deployment
+
+To confirm posting counts match config:
+
+1. Set short poll interval temporarily, e.g. `POLL_MINUTES=5`.
+2. Keep `MAX_POSTS_PER_RUN=12` and `MAX_PER_SOURCE_PER_RUN=3`.
+3. Watch logs for one poll:
+   - Count `[Posted]` lines in that cycle: must be `<= MAX_POSTS_PER_RUN`.
+   - For each source name, count lines: must be `<= MAX_PER_SOURCE_PER_RUN`.
+4. Set `POLL_MINUTES` back to production value (e.g. `180`) and restart:
+
+```bash
+docker compose up -d
+```
