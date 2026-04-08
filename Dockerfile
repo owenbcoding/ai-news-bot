@@ -15,12 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Copy the rest of the source
+# Copy the Python source used at runtime
 COPY bot.py ./
+COPY ai_news_bot.py ./
+COPY news_core.py ./
 
 # Default location for runtime state
 VOLUME ["/app/state"]
 
-# Use /app as CWD; seen.json will live here by default
+# Use /app as CWD; archive and dedupe files live in /app/state
 CMD ["python", "bot.py"]
 
