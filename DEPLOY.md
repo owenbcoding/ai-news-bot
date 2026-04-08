@@ -1,6 +1,6 @@
 # Deploy ai-news-bot on Raspberry Pi 24/7
 
-This guide walks through running the bot in Docker on a Raspberry Pi with automatic restart and persistent state.
+This guide walks through running the bot in Docker on a Raspberry Pi with automatic restart and persistent archive/dedupe state.
 
 ## Prerequisites
 
@@ -48,11 +48,13 @@ Set at minimum:
 |----------|-------------|
 | `DISCORD_TOKEN` | Bot token from [Discord Developer Portal](https://discord.com/developers/applications) |
 | `CHANNEL_ID` | Text channel ID (Developer Mode → right-click channel → Copy ID) |
-| `POLL_MINUTES` | Poll interval (default `180` = 3 hours) |
+| `AI_CHANNEL_ID` | Optional dedicated AI news channel ID (falls back to `CHANNEL_ID`) |
+| `POST_TIMES_UTC` | Comma-separated UTC posting times (default `09:00,17:00`) |
 | `MAX_POSTS_PER_RUN` | Max articles per cycle (default `12`) |
 | `MAX_PER_SOURCE_PER_RUN` | Max per feed per cycle (default `3`) |
+| `POST_TEXT_DIGEST` | Set to `1` to send a plain-text digest after embeds |
 
-`SEEN_PATH` is overridden in Docker to `/app/state/seen.json` so deduplication persists across restarts.
+Docker overrides the persistent storage paths so both the append-only archive and the canonical URL dedupe index survive restarts.
 
 ## 3. Build and Run
 
@@ -73,9 +75,9 @@ You should see:
 
 - `Logged in as ...`
 - `Watching 6 feeds`
-- `Polling every X minutes`
+- `Scheduled posts at 09:00 UTC, 17:00 UTC`
 
-On each poll cycle: either `[Info] No new items to post` or `[Posted] Source: Title...`.
+On each scheduled run: either `[Info] No new items to post` or `[Posted] Source: Title...`.
 
 ## 5. Auto-Start After Reboot
 
@@ -108,5 +110,5 @@ docker compose ps
 ## Architecture Notes
 
 - **Base image**: `python:3.12-slim` is multi-arch. On Pi 4/5 (arm64) or Pi 3 (armv7), Docker pulls the correct image.
-- **State**: `seen.json` is stored in a Docker volume `ai_news_bot_state` at `/app/state/`.
-- **Logic**: All RSS polling, round-robin distribution, and Discord posting runs inside the container; no code changes needed for Pi.
+- **State**: `ai_news_archive.jsonl` and `ai_news_dedupe_index.json` are stored in the Docker volume `ai_news_bot_state` at `/app/state/`.
+- **Logic**: All RSS polling, canonical URL normalization, round-robin distribution, archive persistence, slash commands, and Discord posting run inside the container.

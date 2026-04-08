@@ -6,8 +6,9 @@ services:
     env_file:
       - .env
     environment:
-      # Persist dedupe state in a mounted volume
-      - SEEN_PATH=/app/state/seen.json
+      # Persist archive and dedupe state in the mounted volume
+      - AI_ARCHIVE_PATH=/app/state/ai_news_archive.jsonl
+      - AI_DEDUPE_INDEX_PATH=/app/state/ai_news_dedupe_index.json
     volumes:
       - ai_news_bot_state:/app/state
     logging:

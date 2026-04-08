@@ -39,6 +39,8 @@ env/
 
 # Runtime state
 seen.json
+state/
+*.jsonl
 
 # OS
 .DS_Store

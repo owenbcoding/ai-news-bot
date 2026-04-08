@@ -1,6 +1,42 @@
 # ai-news-bot
 
-A Discord bot that posts AI news links (plain text) from multiple RSS feeds into a channel on a schedule.
+A Discord RSS bot for AI news that uses a shared posting pipeline, posts articles as embeds, dedupes by canonical URL hash, and keeps a permanent append-only archive of every posted link.
+
+## Structure
+
+- `news_core.py`: shared logic for feed fetching, URL normalization, dedupe, archive storage, embed formatting, and Discord posting
+- `ai_news_bot.py`: AI-specific feed list and channel configuration
+- `bot.py`: compatibility entrypoint so `python bot.py` still works
+- `verify.py`: verification script for canonical URL dedupe, archive persistence, round-robin selection, and live feed fetches
+
+## Stored Per Article
+
+Each posted article is saved with:
+
+- `source`
+- `title`
+- `url`
+- `canonical_url`
+- `published_at`
+- `posted_at`
+- `discord_message_id`
+
+The bot keeps links in 3 places:
+
+- Discord embed message
+- append-only archive file at `state/ai_news_archive.jsonl`
+- dedupe index at `state/ai_news_dedupe_index.json`
+
+## Discord Output
+
+Each article is posted as an embed with:
+
+- clickable embed title
+- cleaned summary in the description
+- `Read article` field with the full URL
+- footer containing source and published date
+
+Optionally, the bot can also post a plain-text digest after the embeds by setting `POST_TEXT_DIGEST=1`.
 
 ## Setup
 
@@ -20,116 +56,61 @@ cp .env.example .env
 
 3. Fill in `.env`:
 
-- **DISCORD_TOKEN**: your bot token (Discord Developer Portal → your app → Bot)
-- **CHANNEL_ID**: the *text channel ID* you want the bot to post in  
-  (Discord Developer Mode ON → right-click channel → Copy Channel ID)
-- **GUILD_ID** (recommended): your server ID for instant `/ping` availability  
-  (right-click server icon → Copy Server ID)
+- `DISCORD_TOKEN`: your bot token
+- `CHANNEL_ID`: default Discord text channel ID
+- `AI_CHANNEL_ID`: optional dedicated AI news channel ID; falls back to `CHANNEL_ID`
+- `GUILD_ID`: optional guild ID for faster slash command sync
+- `POST_TIMES_UTC`: comma-separated UTC posting times, for example `09:00,17:00`
+- `MAX_POSTS_PER_RUN`: max articles posted each cycle
+- `MAX_PER_SOURCE_PER_RUN`: max articles per source each cycle
+- `POST_TEXT_DIGEST=1`: optional plain-text digest message after embeds
+
+By default, the bot posts twice a day at `09:00 UTC` and `17:00 UTC`.
 
 ## Run
+
+Either command works:
 
 ```bash
 source .venv/bin/activate
 python bot.py
 ```
 
-## Run 24/7 with Docker (recommended for Raspberry Pi)
-
-This setup keeps the bot running continuously, restarts automatically after reboots/crashes, and persists `seen.json` so links are not reposted. See **[DEPLOY.md](DEPLOY.md)** for a full Raspberry Pi deployment guide.
-
-### 1) Prerequisites on Pi
-
-Install Docker + Docker Compose plugin, then add your user to `docker` group.
-
-### 2) Configure env
-
 ```bash
-cp .env.example .env
+source .venv/bin/activate
+python ai_news_bot.py
 ```
 
-Set at minimum:
+## Slash Command
 
-- `DISCORD_TOKEN`
-- `CHANNEL_ID`
-- `POLL_MINUTES`
-- `MAX_POSTS_PER_RUN` (default `12`)
-- `MAX_PER_SOURCE_PER_RUN` (default `3`)
+The bot exposes:
 
-### 3) Build and start
+- `/latestlinks`: prints the latest saved links from the archive
 
-```bash
-docker compose up -d --build
-```
+## Verify Bot Logic
 
-### 4) Useful operations
+Run the verification script before deploying:
 
 ```bash
-docker compose ps
-docker compose logs -f
-docker compose restart
-docker compose pull && docker compose up -d --build
-```
-
-### 5) Verify auto-start after reboot
-
-```bash
-sudo reboot
-# after reconnect
-docker compose ps
-```
-
-Container should come back automatically because `restart: unless-stopped` is set in `docker-compose.yml`.
-
-## Verify bot logic (before deploying)
-
-Run the verification script to validate feed fetching, deduplication, and round-robin logic (no Discord token required):
-
-```bash
-source .venv/bin/activate   # or: pip install -r requirements.txt
+source .venv/bin/activate
 python verify.py
 ```
 
-Expected output: `All checks passed`. This confirms the core logic works before deploying.
+Expected output: `All checks passed`
 
-## Verify bot behavior (when running)
+## Run 24/7 with Docker
 
-When running, logs should show:
+Docker persists archive and dedupe data in `/app/state`. See **[DEPLOY.md](DEPLOY.md)** for the Raspberry Pi deployment guide.
 
-- `Logged in as ...`
-- `Watching 6 feeds`
-- `Polling every X minutes`
-
-Then on each cycle:
-
-- `[Info] No new items to post`, or
-- several `[Posted] Source: Title...` lines
-
-## Behavior / settings (current logic)
-
-All settings are configured via `.env`:
-
-- **POLL_MINUTES**: how often feeds are fetched (e.g. `30`)
-- **MAX_POSTS_PER_RUN**: hard cap of articles posted per poll cycle (default `12`)
-- **MAX_PER_SOURCE_PER_RUN**: cap per source inside each cycle (default `3`)
-- **SEEN_PATH**: path to dedupe file (`seen.json`) used to avoid reposting
+```bash
+docker compose up -d --build
+docker compose logs -f
+docker compose ps
+```
 
 ## Notes
 
-- The bot stores seen items in `seen.json` to avoid reposting. This file is ignored by git.
-- Some feeds may block RSS access (HTTP 403). The bot will skip those feeds.
-- In Docker, dedupe state is persisted in a named volume mounted at `/app/state`.
-
-## Article count sanity check after deployment
-
-To confirm posting counts match config:
-
-1. Set short poll interval temporarily, e.g. `POLL_MINUTES=5`.
-2. Keep `MAX_POSTS_PER_RUN=12` and `MAX_PER_SOURCE_PER_RUN=3`.
-3. Watch logs for one poll:
-   - Count `[Posted]` lines in that cycle: must be `<= MAX_POSTS_PER_RUN`.
-   - For each source name, count lines: must be `<= MAX_PER_SOURCE_PER_RUN`.
-4. Set `POLL_MINUTES` back to production value (e.g. `180`) and restart:
-
-```bash
-docker compose up -d
-```
+- Feed URLs remain in the AI bot config and are unchanged from the original bot.
+- Dedupe uses `sha256(canonical_url)` instead of feed GUIDs.
+- The archive is append-only, so old posted links stay available for later lookup or reposting.
+- Some feeds may intermittently fail or return HTTP errors; the bot logs and skips them for that cycle.
