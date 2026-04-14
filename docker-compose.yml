@@ -1,5 +1,6 @@
 services:
   ai-news-bot:
+    image: ai-news-bot:latest
     build: .
     container_name: ai-news-bot
     restart: unless-stopped
