@@ -367,6 +367,7 @@ class NewsDiscordClient(discord.Client):
 
     @tasks.loop(time=[time(hour=9, tzinfo=timezone.utc), time(hour=17, tzinfo=timezone.utc)])
     async def poll_and_post(self) -> None:
+        print(f"[poll] Scheduled run started at {utc_now_iso()} UTC")
         channel = await self._resolve_channel()
         headers = {"User-Agent": USER_AGENT}
 
@@ -390,13 +391,23 @@ class NewsDiscordClient(discord.Client):
                 if not self.store.has_canonical_url(item.canonical_url)
             ]
 
+        new_by_source = {name: len(items) for name, items in items_by_source.items()}
+        new_total = sum(new_by_source.values())
+        print(
+            f"[poll] New items (not in dedupe index): {new_total} total "
+            f"({', '.join(f'{k}={v}' for k, v in new_by_source.items())})"
+        )
+
         selected = select_round_robin(
             items_by_source,
             max_total=self.config.max_posts_per_run,
             max_per_source=self.config.max_per_source_per_run,
         )
         if not selected:
-            print("[Info] No new items to post")
+            print(
+                "[Info] No new items to post — all feed entries are already in the "
+                "dedupe index, or feeds returned no entries / all fetches failed."
+            )
             return
 
         posted_items: List[FeedItem] = []
