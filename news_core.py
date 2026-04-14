@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import traceback
 from dataclasses import asdict, dataclass
 from datetime import datetime, time, timezone
 from html import unescape
@@ -367,6 +368,18 @@ class NewsDiscordClient(discord.Client):
 
     @tasks.loop(time=[time(hour=9, tzinfo=timezone.utc), time(hour=17, tzinfo=timezone.utc)])
     async def poll_and_post(self) -> None:
+        # discord.ext.tasks stops the entire loop on any exception not in its reconnect
+        # list (e.g. HTTPException). Catch everything so later runs still fire.
+        try:
+            await self._run_poll_and_post()
+        except Exception as exc:
+            print(
+                "[Error] Scheduled poll crashed; the next run will still occur at the "
+                f"configured times. Reason: {exc}"
+            )
+            traceback.print_exc()
+
+    async def _run_poll_and_post(self) -> None:
         print(f"[poll] Scheduled run started at {utc_now_iso()} UTC")
         channel = await self._resolve_channel()
         headers = {"User-Agent": USER_AGENT}
@@ -436,6 +449,11 @@ class NewsDiscordClient(discord.Client):
         if not self._poll_started:
             self.poll_and_post.start()
             self._poll_started = True
+            await asyncio.sleep(0)
+            next_at = self.poll_and_post.next_iteration
+            if next_at is not None:
+                next_utc = next_at.astimezone(timezone.utc)
+                print(f"✓ Next poll at {next_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC")
 
 
 def run_bot(config: NewsBotConfig) -> None:
