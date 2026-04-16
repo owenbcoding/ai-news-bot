@@ -1,5 +1,4 @@
 import os
-from datetime import time, timezone
 from typing import List, Tuple
 
 from dotenv import load_dotenv
@@ -16,26 +15,9 @@ def optional_int_env(name: str) -> int | None:
     return int(raw)
 
 
-def parse_post_times_utc(raw: str) -> tuple[time, ...]:
-    times: list[time] = []
-    for part in raw.split(","):
-        value = part.strip()
-        if not value:
-            continue
-
-        hour_text, minute_text = value.split(":", maxsplit=1)
-        times.append(time(hour=int(hour_text), minute=int(minute_text), tzinfo=timezone.utc))
-
-    if not times:
-        raise ValueError("POST_TIMES_UTC must include at least one HH:MM value")
-
-    return tuple(times)
-
-
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 AI_CHANNEL_ID = int(os.getenv("AI_CHANNEL_ID") or os.getenv("CHANNEL_ID", "0"))
 GUILD_ID = optional_int_env("GUILD_ID")
-POST_TIMES_UTC = parse_post_times_utc(os.getenv("POST_TIMES_UTC", "09:00,17:00"))
 MAX_POSTS_PER_RUN = int(os.getenv("MAX_POSTS_PER_RUN", "12"))
 MAX_PER_SOURCE_PER_RUN = int(os.getenv("MAX_PER_SOURCE_PER_RUN", "3"))
 POST_TEXT_DIGEST = os.getenv("POST_TEXT_DIGEST", "0") == "1"
@@ -68,7 +50,6 @@ def main() -> None:
         discord_token=DISCORD_TOKEN,
         channel_id=AI_CHANNEL_ID,
         guild_id=GUILD_ID,
-        post_times_utc=POST_TIMES_UTC,
         max_posts_per_run=MAX_POSTS_PER_RUN,
         max_per_source_per_run=MAX_PER_SOURCE_PER_RUN,
         feeds=FEEDS,

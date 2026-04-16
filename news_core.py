@@ -6,6 +6,7 @@ import re
 import traceback
 from dataclasses import asdict, dataclass
 from datetime import datetime, time, timezone
+from email.utils import parsedate_to_datetime
 from html import unescape
 from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -25,6 +26,12 @@ TRACKING_QUERY_KEYS = {
     "gbraid",
     "wbraid",
 }
+
+# Same schedule as dev-news-bot: 09:00 and 17:00 UTC (GMT, no DST).
+UTC_POST_TIMES = (
+    time(hour=9, minute=0, tzinfo=timezone.utc),
+    time(hour=17, minute=0, tzinfo=timezone.utc),
+)
 
 
 @dataclass
@@ -55,7 +62,6 @@ class NewsBotConfig:
     discord_token: str
     channel_id: int
     guild_id: Optional[int]
-    post_times_utc: Sequence[time]
     max_posts_per_run: int
     max_per_source_per_run: int
     feeds: Sequence[Tuple[str, str]]
@@ -127,7 +133,14 @@ def extract_published_at(entry: feedparser.FeedParserDict) -> Optional[str]:
 
     published = entry.get("published") or entry.get("updated")
     if published:
-        return str(published)
+        raw = str(published)
+        try:
+            parsed = parsedate_to_datetime(raw)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).isoformat()
+        except (TypeError, ValueError):
+            return raw
 
     return None
 
@@ -223,6 +236,39 @@ class ArticleStore:
             return {}
         return {}
 
+    def rebuild_index_from_archive_if_empty(self) -> None:
+        if self.index:
+            return
+        try:
+            with open(self.archive_path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                        canonical_url = payload.get("canonical_url")
+                        if not canonical_url:
+                            continue
+                        article_hash = canonical_url_hash(str(canonical_url))
+                        if article_hash not in self.index:
+                            self.index[article_hash] = {
+                                "canonical_url": str(canonical_url),
+                                "url": str(payload.get("url", "")),
+                                "title": str(payload.get("title", "")),
+                                "source": str(payload.get("source", "")),
+                                "posted_at": str(payload.get("posted_at", "")),
+                                "discord_message_id": str(
+                                    payload.get("discord_message_id", "")
+                                ),
+                            }
+                    except Exception:
+                        continue
+        except FileNotFoundError:
+            return
+        if self.index:
+            self._write_index()
+
     def has_canonical_url(self, canonical_url: str) -> bool:
         return canonical_url_hash(canonical_url) in self.index
 
@@ -306,9 +352,8 @@ class NewsDiscordClient(discord.Client):
         super().__init__(intents=intents)
         self.config = config
         self.store = ArticleStore(config.archive_path, config.dedupe_index_path)
+        self.store.rebuild_index_from_archive_if_empty()
         self.tree = app_commands.CommandTree(self)
-        self._poll_started = False
-        self.poll_and_post.change_interval(time=list(config.post_times_utc))
 
     async def setup_hook(self) -> None:
         @app_commands.command(
@@ -366,7 +411,7 @@ class NewsDiscordClient(discord.Client):
             channel = await self.fetch_channel(self.config.channel_id)
         return channel
 
-    @tasks.loop(time=[time(hour=9, tzinfo=timezone.utc), time(hour=17, tzinfo=timezone.utc)])
+    @tasks.loop(time=UTC_POST_TIMES)
     async def poll_and_post(self) -> None:
         # discord.ext.tasks stops the entire loop on any exception not in its reconnect
         # list (e.g. HTTPException). Catch everything so later runs still fire.
@@ -439,16 +484,16 @@ class NewsDiscordClient(discord.Client):
             except Exception as exc:
                 print(f"[Warn] Failed to post text digest: {exc}")
 
+    @poll_and_post.before_loop
+    async def before_poll_and_post(self) -> None:
+        await self.wait_until_ready()
+
     async def on_ready(self) -> None:
         print(f"✓ Logged in as {self.user}")
         print(f"✓ {self.config.bot_name} watching {len(self.config.feeds)} feeds")
-        schedule = ", ".join(
-            post_time.strftime("%H:%M UTC") for post_time in self.config.post_times_utc
-        )
-        print(f"✓ Scheduled posts at {schedule}")
-        if not self._poll_started:
+        print("✓ Scheduled posts at 09:00 UTC and 17:00 UTC (GMT)")
+        if not self.poll_and_post.is_running():
             self.poll_and_post.start()
-            self._poll_started = True
             await asyncio.sleep(0)
             next_at = self.poll_and_post.next_iteration
             if next_at is not None:
@@ -457,5 +502,9 @@ class NewsDiscordClient(discord.Client):
 
 
 def run_bot(config: NewsBotConfig) -> None:
+    if not config.discord_token:
+        raise SystemExit("ERROR: DISCORD_TOKEN not set")
+    if config.channel_id == 0:
+        raise SystemExit("ERROR: channel_id is 0; set AI_CHANNEL_ID or CHANNEL_ID")
     client = NewsDiscordClient(config)
     client.run(config.discord_token)
