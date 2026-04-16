@@ -27,9 +27,8 @@ TRACKING_QUERY_KEYS = {
     "wbraid",
 }
 
-# Same schedule as dev-news-bot: 09:00 and 17:00 UTC (GMT, no DST).
+# Post once daily at 17:00 UTC (17:00 GMT in winter, 18:00 BST in summer).
 UTC_POST_TIMES = (
-    time(hour=9, minute=0, tzinfo=timezone.utc),
     time(hour=17, minute=0, tzinfo=timezone.utc),
 )
 
@@ -354,7 +353,6 @@ class NewsDiscordClient(discord.Client):
         self.store = ArticleStore(config.archive_path, config.dedupe_index_path)
         self.store.rebuild_index_from_archive_if_empty()
         self.tree = app_commands.CommandTree(self)
-        self._startup_poll_started = False
 
     async def setup_hook(self) -> None:
         @app_commands.command(
@@ -489,23 +487,10 @@ class NewsDiscordClient(discord.Client):
     async def before_poll_and_post(self) -> None:
         await self.wait_until_ready()
 
-    async def _run_startup_poll_once(self) -> None:
-        if self._startup_poll_started:
-            return
-
-        self._startup_poll_started = True
-        print("[startup] Running immediate poll after login")
-        try:
-            await self._run_poll_and_post()
-            print("[startup] Immediate poll finished")
-        except Exception as exc:
-            print(f"[Error] Startup poll failed: {exc}")
-            traceback.print_exc()
-
     async def on_ready(self) -> None:
         print(f"✓ Logged in as {self.user}")
         print(f"✓ {self.config.bot_name} watching {len(self.config.feeds)} feeds")
-        print("✓ Scheduled posts at 09:00 UTC and 17:00 UTC (GMT)")
+        print("✓ Scheduled post at 17:00 UTC daily")
         if not self.poll_and_post.is_running():
             self.poll_and_post.start()
             await asyncio.sleep(0)
@@ -513,8 +498,6 @@ class NewsDiscordClient(discord.Client):
             if next_at is not None:
                 next_utc = next_at.astimezone(timezone.utc)
                 print(f"✓ Next poll at {next_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-        if not self._startup_poll_started:
-            self.loop.create_task(self._run_startup_poll_once())
 
 
 def run_bot(config: NewsBotConfig) -> None:

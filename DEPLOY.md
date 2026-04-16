@@ -49,9 +49,8 @@ Set at minimum:
 | `DISCORD_TOKEN` | Bot token from [Discord Developer Portal](https://discord.com/developers/applications) |
 | `CHANNEL_ID` | Text channel ID (Developer Mode → right-click channel → Copy ID) |
 | `AI_CHANNEL_ID` | Optional dedicated AI news channel ID (falls back to `CHANNEL_ID`) |
-| `POST_TIMES_UTC` | Comma-separated UTC posting times (default `09:00,17:00`) |
 | `MAX_POSTS_PER_RUN` | Max articles per cycle (default `12`) |
-| `MAX_PER_SOURCE_PER_RUN` | Max per feed per cycle (default `3`) |
+| `MAX_PER_SOURCE_PER_RUN` | Max per feed per cycle (default `2`) |
 | `POST_TEXT_DIGEST` | Set to `1` to send a plain-text digest after embeds |
 
 Docker overrides the persistent storage paths so both the append-only archive and the canonical URL dedupe index survive restarts.
@@ -75,7 +74,7 @@ You should see:
 
 - `Logged in as ...`
 - `Watching 6 feeds`
-- `Scheduled posts at 09:00 UTC, 17:00 UTC`
+- `Scheduled post at 17:00 UTC daily`
 
 On each scheduled run: either `[Info] No new items to post` or `[Posted] Source: Title...`.
 

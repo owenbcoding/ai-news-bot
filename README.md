@@ -60,12 +60,11 @@ cp .env.example .env
 - `CHANNEL_ID`: default Discord text channel ID
 - `AI_CHANNEL_ID`: optional dedicated AI news channel ID; falls back to `CHANNEL_ID`
 - `GUILD_ID`: optional guild ID for faster slash command sync
-- `POST_TIMES_UTC`: comma-separated UTC posting times, for example `09:00,17:00`
 - `MAX_POSTS_PER_RUN`: max articles posted each cycle
 - `MAX_PER_SOURCE_PER_RUN`: max articles per source each cycle
 - `POST_TEXT_DIGEST=1`: optional plain-text digest message after embeds
 
-By default, the bot posts twice a day at `09:00 UTC` and `17:00 UTC`.
+By default, the bot posts once a day at `17:00 UTC`.
 
 ## Run
 

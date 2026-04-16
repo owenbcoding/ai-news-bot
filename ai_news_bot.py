@@ -19,7 +19,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 AI_CHANNEL_ID = int(os.getenv("AI_CHANNEL_ID") or os.getenv("CHANNEL_ID", "0"))
 GUILD_ID = optional_int_env("GUILD_ID")
 MAX_POSTS_PER_RUN = int(os.getenv("MAX_POSTS_PER_RUN", "12"))
-MAX_PER_SOURCE_PER_RUN = int(os.getenv("MAX_PER_SOURCE_PER_RUN", "3"))
+MAX_PER_SOURCE_PER_RUN = int(os.getenv("MAX_PER_SOURCE_PER_RUN", "2"))
 POST_TEXT_DIGEST = os.getenv("POST_TEXT_DIGEST", "0") == "1"
 AI_ARCHIVE_PATH = os.getenv("AI_ARCHIVE_PATH", "state/ai_news_archive.jsonl")
 AI_DEDUPE_INDEX_PATH = os.getenv(

@@ -23,7 +23,7 @@ from news_core import (
 )
 
 MAX_POSTS_PER_RUN = int(os.getenv("MAX_POSTS_PER_RUN", "12"))
-MAX_PER_SOURCE = int(os.getenv("MAX_PER_SOURCE_PER_RUN", "3"))
+MAX_PER_SOURCE = int(os.getenv("MAX_PER_SOURCE_PER_RUN", "2"))
 
 
 def test_url_normalization() -> None:
