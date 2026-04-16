@@ -354,6 +354,7 @@ class NewsDiscordClient(discord.Client):
         self.store = ArticleStore(config.archive_path, config.dedupe_index_path)
         self.store.rebuild_index_from_archive_if_empty()
         self.tree = app_commands.CommandTree(self)
+        self._startup_poll_started = False
 
     async def setup_hook(self) -> None:
         @app_commands.command(
@@ -488,6 +489,19 @@ class NewsDiscordClient(discord.Client):
     async def before_poll_and_post(self) -> None:
         await self.wait_until_ready()
 
+    async def _run_startup_poll_once(self) -> None:
+        if self._startup_poll_started:
+            return
+
+        self._startup_poll_started = True
+        print("[startup] Running immediate poll after login")
+        try:
+            await self._run_poll_and_post()
+            print("[startup] Immediate poll finished")
+        except Exception as exc:
+            print(f"[Error] Startup poll failed: {exc}")
+            traceback.print_exc()
+
     async def on_ready(self) -> None:
         print(f"✓ Logged in as {self.user}")
         print(f"✓ {self.config.bot_name} watching {len(self.config.feeds)} feeds")
@@ -499,6 +513,8 @@ class NewsDiscordClient(discord.Client):
             if next_at is not None:
                 next_utc = next_at.astimezone(timezone.utc)
                 print(f"✓ Next poll at {next_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        if not self._startup_poll_started:
+            self.loop.create_task(self._run_startup_poll_once())
 
 
 def run_bot(config: NewsBotConfig) -> None:
