@@ -49,6 +49,9 @@ Set at minimum:
 | `DISCORD_TOKEN` | Bot token from [Discord Developer Portal](https://discord.com/developers/applications) |
 | `CHANNEL_ID` | Text channel ID (Developer Mode → right-click channel → Copy ID) |
 | `AI_CHANNEL_ID` | Optional dedicated AI news channel ID (falls back to `CHANNEL_ID`) |
+| `POST_TIMEZONE` | Optional local timezone such as `Europe/London` |
+| `POST_TIMES_LOCAL` | Optional comma-separated local posting times such as `09:00,18:00` |
+| `POST_TIMES_UTC` | Fallback comma-separated UTC posting times such as `09:00,17:00` |
 | `MAX_POSTS_PER_RUN` | Max articles per cycle (default `12`) |
 | `MAX_PER_SOURCE_PER_RUN` | Max per feed per cycle (default `2`) |
 | `POST_TEXT_DIGEST` | Set to `1` to send a plain-text digest after embeds |
@@ -74,7 +77,7 @@ You should see:
 
 - `Logged in as ...`
 - `Watching 6 feeds`
-- `Scheduled post at 17:00 UTC daily`
+- `Scheduled posts at 09:00, 18:00 (Europe/London) daily` (or whatever you configured)
 
 On each scheduled run: either `[Info] No new items to post` or `[Posted] Source: Title...`.
 

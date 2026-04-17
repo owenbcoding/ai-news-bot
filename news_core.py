@@ -10,6 +10,7 @@ from email.utils import parsedate_to_datetime
 from html import unescape
 from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 import discord
@@ -27,10 +28,70 @@ TRACKING_QUERY_KEYS = {
     "wbraid",
 }
 
-# Post once daily at 17:00 UTC (17:00 GMT in winter, 18:00 BST in summer).
-UTC_POST_TIMES = (
-    time(hour=17, minute=0, tzinfo=timezone.utc),
-)
+def parse_post_times(raw_value: str, tzinfo: timezone | ZoneInfo) -> Tuple[time, ...]:
+    entries = [entry.strip() for entry in raw_value.split(",") if entry.strip()]
+    if not entries:
+        raise ValueError("Post schedule must contain at least one HH:MM entry")
+
+    parsed_times: List[time] = []
+    seen: set[str] = set()
+    for entry in entries:
+        parts = entry.split(":")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid schedule entry {entry!r}; expected HH:MM")
+
+        hour_str, minute_str = parts
+        try:
+            hour = int(hour_str)
+            minute = int(minute_str)
+        except ValueError as exc:
+            raise ValueError(f"Invalid schedule entry {entry!r}; expected HH:MM") from exc
+
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError(
+                f"Invalid schedule entry {entry!r}; hour must be 00-23 and "
+                "minute must be 00-59"
+            )
+
+        normalized = f"{hour:02d}:{minute:02d}"
+        if normalized in seen:
+            continue
+
+        seen.add(normalized)
+        parsed_times.append(time(hour=hour, minute=minute, tzinfo=tzinfo))
+
+    parsed_times.sort(key=lambda entry: (entry.hour, entry.minute))
+    return tuple(parsed_times)
+
+
+def parse_post_times_utc(raw_value: str) -> Tuple[time, ...]:
+    return parse_post_times(raw_value, timezone.utc)
+
+
+def load_post_schedule() -> Tuple[Tuple[time, ...], str]:
+    local_times_raw = (os.getenv("POST_TIMES_LOCAL") or "").strip()
+    timezone_name = (os.getenv("POST_TIMEZONE") or "UTC").strip()
+
+    try:
+        if local_times_raw:
+            tzinfo = ZoneInfo(timezone_name)
+            post_times = parse_post_times(local_times_raw, tzinfo)
+            return post_times, f"{format_post_times(post_times)} ({timezone_name})"
+
+        raw_value = (os.getenv("POST_TIMES_UTC") or "17:00").strip()
+        post_times = parse_post_times_utc(raw_value)
+        return post_times, f"{format_post_times(post_times)} (UTC)"
+    except ZoneInfoNotFoundError as exc:
+        raise SystemExit(f"ERROR: unknown POST_TIMEZONE value {timezone_name!r}") from exc
+    except ValueError as exc:
+        raise SystemExit(f"ERROR: {exc}") from exc
+
+
+def format_post_times(post_times: Sequence[time]) -> str:
+    return ", ".join(f"{entry.hour:02d}:{entry.minute:02d}" for entry in post_times)
+
+
+POST_TIMES, POST_TIMES_LABEL = load_post_schedule()
 
 
 @dataclass
@@ -410,7 +471,7 @@ class NewsDiscordClient(discord.Client):
             channel = await self.fetch_channel(self.config.channel_id)
         return channel
 
-    @tasks.loop(time=UTC_POST_TIMES)
+    @tasks.loop(time=POST_TIMES)
     async def poll_and_post(self) -> None:
         # discord.ext.tasks stops the entire loop on any exception not in its reconnect
         # list (e.g. HTTPException). Catch everything so later runs still fire.
@@ -490,7 +551,7 @@ class NewsDiscordClient(discord.Client):
     async def on_ready(self) -> None:
         print(f"✓ Logged in as {self.user}")
         print(f"✓ {self.config.bot_name} watching {len(self.config.feeds)} feeds")
-        print("✓ Scheduled post at 17:00 UTC daily")
+        print(f"✓ Scheduled posts at {POST_TIMES_LABEL} daily")
         if not self.poll_and_post.is_running():
             self.poll_and_post.start()
             await asyncio.sleep(0)

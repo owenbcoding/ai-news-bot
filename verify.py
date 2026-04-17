@@ -19,6 +19,7 @@ from news_core import (
     canonical_url_hash,
     fetch_feed,
     normalize_url,
+    parse_post_times_utc,
     select_round_robin,
 )
 
@@ -89,6 +90,15 @@ def test_round_robin() -> None:
     print("[OK] Round-robin distribution")
 
 
+def test_post_schedule_parsing() -> None:
+    result = parse_post_times_utc("17:00,09:00,17:00")
+    assert [f"{entry.hour:02d}:{entry.minute:02d}" for entry in result] == [
+        "09:00",
+        "17:00",
+    ]
+    print("[OK] Post schedule parsing")
+
+
 async def test_feed_fetch() -> None:
     headers = {"User-Agent": USER_AGENT}
     async with aiohttp.ClientSession(headers=headers) as session:
@@ -123,6 +133,7 @@ def main() -> None:
     test_url_normalization()
     test_archive_and_dedupe()
     test_round_robin()
+    test_post_schedule_parsing()
     asyncio.run(test_feed_fetch())
     print("\n=== All checks passed ===")
 
